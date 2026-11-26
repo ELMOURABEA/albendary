@@ -1,15 +1,46 @@
-export async function GET() {
-  const response = await fetch('https://api.vercel.app/products', {
-    next: { revalidate: 300 },
-  })
+import { neon } from '@neondatabase/serverless'
+import { NextRequest } from 'next/server'
 
-  if (!response.ok) {
+export async function GET(request: NextRequest) {
+  const databaseUrl = process.env.DATABASE_URL
+
+  if (!databaseUrl) {
     return Response.json(
-      { error: 'Unable to fetch products' },
-      { status: 502 },
+      { ok: false, error: 'DATABASE_URL missing in Vercel Env' },
+      { status: 500 },
     )
   }
 
-  const products = await response.json()
-  return Response.json(products)
+  try {
+    const sql = neon(databaseUrl)
+    const query = request.nextUrl.searchParams.get('q')?.trim() ?? ''
+    const products = query
+      ? await sql`
+          SELECT "id", "nameAr", "nameEn", "activeIngredient", barcode,
+                 "category", "pack", "price", "stock", "branchId", "expiry",
+                 "needsReview", "createdAt", "updatedAt"
+          FROM "Product"
+          WHERE "nameAr" ILIKE ${`%${query}%`}
+             OR "nameEn" ILIKE ${`%${query}%`}
+             OR "activeIngredient" ILIKE ${`%${query}%`}
+             OR barcode = ${query}
+          ORDER BY "nameAr" ASC
+          LIMIT 50
+        `
+      : await sql`
+          SELECT "id", "nameAr", "nameEn", "activeIngredient", barcode,
+                 "category", "pack", "price", "stock", "branchId", "expiry",
+                 "needsReview", "createdAt", "updatedAt"
+          FROM "Product"
+          ORDER BY "nameAr" ASC
+          LIMIT 50
+        `
+
+    return Response.json({ count: products.length, products })
+  } catch {
+    return Response.json(
+      { ok: false, error: 'Unable to load products' },
+      { status: 500 },
+    )
+  }
 }
